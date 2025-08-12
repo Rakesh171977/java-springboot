@@ -10,7 +10,7 @@ pipeline {
     stages {
         stage('Checkout'){
             steps{
-                git branch: 'main', credentialsId: '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', url: 'https://github.com/Rakesh171977/java-springboot.git'
+                git branch: 'main', credentialsId: 'jenkin-bootspring', url: 'https://github.com/Rakesh171977/java-springboot.git'
                 sh 'ls -la'
             }
         }
