@@ -10,14 +10,14 @@ pipeline {
     }
 
     environment {
-        SONARQUBE_URL = 'http://18.224.30.126:9000'
+        SONARQUBE_URL = 'http://13.40.212.134:9000'
         SONARQUBE_TOKEN = credentials('sonar-token')
     }
 
     stages {
         stage('Checkout') {
             steps {
-                git branch: 'main', credentialsId: 'git-id', url: 'https://github.com/Rakesh171977/java-springboot.git'
+                git branch: 'main', credentialsId: 'git-token', url: 'https://github.com/Rakesh171977/java-springboot.git'
                 sh 'ls -la'
             }
         }
