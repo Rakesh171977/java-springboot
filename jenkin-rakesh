@@ -2,7 +2,7 @@ pipeline {
     agent any
 
     tools {
-        maven 'maven'   // Jenkins Maven installation
+        maven 'maven'
     }
 
     stages {
@@ -12,23 +12,21 @@ pipeline {
             }
         }
 
-        stage('Build') {
+        stage('Build with Maven') {
             steps {
-                sh 'mvn clean install'
+                sh 'mvn clean package -DskipTests'
             }
         }
 
-        stage('Package') {
+        stage('Docker Build & Push') {
             steps {
-                sh 'mvn package'
-            }
-        }
-
-        stage('Deploy') {
-            steps {
-                sh """
-                nohup java -jar target/simple-rakesh-hello-1.0.0.jar --server.port=9000 > app.log 2>&1 &
-                """
+                withCredentials([usernamePassword(credentialsId: 'docker-token-rakesh', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
+                    sh '''
+                        echo $DOCKER_PASS | docker login -u $DOCKER_USER --password-stdin
+                        docker build -t rakesh171977/springboot-app:latest .
+                        docker push rakesh171977/springboot-app:latest
+                    '''
+                }
             }
         }
     }
