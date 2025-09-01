@@ -1,14 +1,22 @@
 pipeline {
     agent any
 
-    tools {
-        maven 'maven'
+    environment {
+        DOCKER_IMAGE = "rakesh171977/springboot-app:${env.BUILD_NUMBER}"
+        AWS_REGION = "eu-west-2"
+        EKS_CLUSTER = "team4-eks-cluster"
+        NAMESPACE = "rakesh-namespace"
+        DEPLOYMENT_NAME = "springboot-deployment"
+        CONTAINER_NAME = "springboot-container"
+        DB_HOST = "mysql-service"
+        APP_ENV = "production"
+        APP_DEBUG = "false"
     }
 
     stages {
-        stage('Checkout') {
+        stage('Checkout Code') {
             steps {
-                git branch: 'main', credentialsId: 'gitId', url: 'https://github.com/Rakesh171977/java-springboot.git'
+                git branch: 'main', url: 'https://github.com/Rakesh171977/java-springboot.git'
             }
         }
 
@@ -18,16 +26,88 @@ pipeline {
             }
         }
 
-        stage('Docker Build & Push') {
+        stage('Build Docker Image') {
             steps {
-                withCredentials([usernamePassword(credentialsId: 'docker-token-rakesh', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
-                    sh '''
-                        echo $DOCKER_PASS | docker login -u $DOCKER_USER --password-stdin
-                        docker build -t rakesh171977/springboot-app:latest .
-                        docker push rakesh171977/springboot-app:latest
-                    '''
+                script {
+                    sh "docker build -t ${DOCKER_IMAGE} ."
                 }
             }
+        }
+
+        stage('Push Docker Image') {
+            steps {
+                withCredentials([usernamePassword(credentialsId: 'dockerhub-cred', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
+                    sh 'echo $DOCKER_PASS | docker login -u $DOCKER_USER --password-stdin'
+                    sh "docker push ${DOCKER_IMAGE}"
+                }
+            }
+        }
+
+        stage('Deploy to EKS') {
+            steps {
+                withCredentials([usernamePassword(credentialsId: 'aws-cred', usernameVariable: 'AWS_ACCESS_KEY_ID', passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
+                    sh """
+                    aws eks --region ${AWS_REGION} update-kubeconfig --name ${EKS_CLUSTER}
+
+                    # Create namespace if not exists
+                    kubectl create namespace ${NAMESPACE} --dry-run=client -o yaml | kubectl apply -f -
+
+                    # Deploy or update Spring Boot app
+                    kubectl apply -f - <<EOF
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ${DEPLOYMENT_NAME}
+  namespace: ${NAMESPACE}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: springboot-app
+  template:
+    metadata:
+      labels:
+        app: springboot-app
+    spec:
+      containers:
+      - name: ${CONTAINER_NAME}
+        image: ${DOCKER_IMAGE}
+        ports:
+        - containerPort: 8080
+        env:
+        - name: DB_HOST
+          value: ${DB_HOST}
+        - name: APP_ENV
+          value: ${APP_ENV}
+        - name: APP_DEBUG
+          value: ${APP_DEBUG}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: springboot-service
+  namespace: ${NAMESPACE}
+spec:
+  type: NodePort
+  selector:
+    app: springboot-app
+  ports:
+    - protocol: TCP
+      port: 8080
+      targetPort: 8080
+EOF
+                    """
+                }
+            }
+        }
+    }
+
+    post {
+        success {
+            echo "Deployment successful! Access your app via NodePort in the cluster."
+        }
+        failure {
+            echo "Deployment failed!"
         }
     }
 }
