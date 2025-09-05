@@ -1,34 +1,40 @@
 pipeline {
-    agent any
+    agent {
+        docker {
+            image 'maven:3.9.6-eclipse-temurin-17'   // Maven + JDK 17
+            args '-v /var/run/docker.sock:/var/run/docker.sock' // bind Docker
+        }
+    }
 
     environment {
         DOCKER_IMAGE = "rakesh171977/springboot-app"
         KUBE_NAMESPACE = "springdemo"
+        HELM_RELEASE = "springboot-app"
     }
 
     stages {
         stage('Build with Maven') {
             steps {
-                echo "🔨 Building Spring Boot app..."
+                echo "🔨 Building Spring Boot app with Maven..."
                 sh 'mvn clean package -DskipTests'
             }
         }
 
         stage('Build Docker Image') {
             steps {
-                echo "🐳 Building Docker image..."
+                echo "🐳 Building Docker Image..."
                 sh 'docker build -t $DOCKER_IMAGE:$BUILD_NUMBER .'
-                sh 'docker tag $DOCKER_IMAGE:$BUILD_NUMBER $DOCKER_IMAGE:latest'
             }
         }
 
         stage('Push Docker Image') {
             steps {
-                echo "📤 Pushing Docker image to DockerHub..."
+                echo "📤 Pushing Docker Image to Docker Hub..."
                 withCredentials([usernamePassword(credentialsId: 'docker-token', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
                     sh '''
                       echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin
                       docker push $DOCKER_IMAGE:$BUILD_NUMBER
+                      docker tag $DOCKER_IMAGE:$BUILD_NUMBER $DOCKER_IMAGE:latest
                       docker push $DOCKER_IMAGE:latest
                     '''
                 }
@@ -37,21 +43,24 @@ pipeline {
 
         stage('Deploy with Helm to Minikube') {
             steps {
-                echo "🚀 Deploying to Minikube with Helm..."
-                sh """
-                helm upgrade --install springboot-app ./springboot-chart \
-                  --namespace $KUBE_NAMESPACE --create-namespace \
-                  --set image.repository=$DOCKER_IMAGE \
-                  --set image.tag=$BUILD_NUMBER
-                """
+                echo "🚀 Deploying Spring Boot app using Helm..."
+                sh '''
+                  kubectl create namespace $KUBE_NAMESPACE --dry-run=client -o yaml | kubectl apply -f -
+
+                  # Install/upgrade Helm release
+                  helm upgrade --install $HELM_RELEASE helm-chart/ \
+                    --namespace $KUBE_NAMESPACE \
+                    --set image.repository=$DOCKER_IMAGE \
+                    --set image.tag=$BUILD_NUMBER
+                '''
             }
         }
 
         stage('Show Access URL') {
             steps {
-                echo "🌐 Fetching NodePort access URL..."
+                echo "🌐 Getting Service URL..."
                 sh '''
-                  NODE_PORT=$(kubectl get svc springboot-app-springboot-chart -n $KUBE_NAMESPACE -o jsonpath='{.spec.ports[0].nodePort}')
+                  NODE_PORT=$(kubectl get svc $HELM_RELEASE -n $KUBE_NAMESPACE -o jsonpath='{.spec.ports[0].nodePort}')
                   NODE_IP=$(minikube ip)
                   echo "=========================================="
                   echo "Access your app at: http://$NODE_IP:$NODE_PORT"
@@ -62,13 +71,11 @@ pipeline {
     }
 
     post {
-        success {
-            echo "✅ Deployment successful!"
-        }
         failure {
             echo "❌ Deployment failed. Please check logs."
         }
+        success {
+            echo "✅ Spring Boot app deployed successfully on Minikube using Helm!"
+        }
     }
 }
-
-
